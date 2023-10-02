@@ -1,107 +1,100 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"log"
+	"os"
+	"reflect"
+	"runtime"
+	"strings"
+	"time"
 )
 
-type TrieNode struct {
-	children map[rune]*TrieNode
-	fail     *TrieNode
-	isEnd    bool
-	pattern  string
-}
-
-type ACMatch struct {
-	root *TrieNode
-}
-
-func NewACMatch() *ACMatch {
-	return &ACMatch{root: &TrieNode{children: make(map[rune]*TrieNode)}}
-}
-
-func (ac *ACMatch) AddPattern(pattern string) {
-	node := ac.root
-	for _, char := range pattern {
-		if node.children == nil {
-			node.children = make(map[rune]*TrieNode)
-		}
-		if _, exists := node.children[char]; !exists {
-			node.children[char] = &TrieNode{}
-		}
-		node = node.children[char]
-	}
-	node.isEnd = true
-	node.pattern = pattern
-}
-
-func (ac *ACMatch) Build() {
-	queue := make([]*TrieNode, 0)
-	ac.root.fail = nil
-	queue = append(queue, ac.root)
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		for char, child := range current.children {
-			queue = append(queue, child)
-
-			failNode := current.fail
-			for failNode != nil {
-				if _, exists := failNode.children[char]; exists {
-					child.fail = failNode.children[char]
-					break
-				}
-				failNode = failNode.fail
-			}
-
-			if failNode == nil {
-				child.fail = ac.root
-			}
-		}
-	}
-}
-
-func (ac *ACMatch) Search(text string) map[int][]string {
-	result := make(map[int][]string)
-	node := ac.root
-
-	for i, char := range text {
-		for node != nil && node.children[char] == nil {
-			node = node.fail
-		}
-		//root fail may be nil
-		if node == nil {
-			node = ac.root
-			continue
-		}
-
-		node = node.children[char]
-		matchNode := node
-		for matchNode != nil {
-			if matchNode.isEnd {
-				result[i-len(matchNode.pattern)+1] = append(result[i-len(matchNode.pattern)+1], matchNode.pattern)
-			}
-			matchNode = matchNode.fail
-		}
-	}
-	return result
-}
-
 func main() {
-	ac := NewACMatch()
+	fmt.Println("begin kmpVsNative -------------------------------")
+	kmpVsNative()
+	fmt.Println("end kmpVsNative -------------------------------")
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("begin acVsKmp -------------------------------")
+	acVsKmp()
+	fmt.Println("end acVsKmp -------------------------------")
+	//GenBtcAddr(1)
+}
 
-	patterns := []string{"he", "she", "his", "hers", "rs", "s"}
-	for _, pattern := range patterns {
-		ac.AddPattern(pattern)
+func kmpVsNative() {
+	content, err := os.ReadFile("files/kmp_text.txt")
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	ac.Build()
+	text := string(content)
+	filename := "files/kmp_pattern.txt"
+	pattern, err := os.ReadFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pastTime(false, text, []string{string(pattern)}, NaiveMatch)
+	pastTime(false, text, []string{string(pattern)}, KMP)
+}
 
-	text := "ukkshers"
-	matches := ac.Search(text)
+func acVsKmp() {
+	content, err := os.ReadFile("files/verbos3.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	text := string(content)
+	filename := "files/addresses_1000.txt"
+	addresses, err := ReadAddressesFromFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pastTime(true, text, addresses, KMP)
+	pastTime(true, text, addresses, AC)
+}
+
+func pastTime(isPrintPattern bool, text string, addresses []string, fun func(text string, addresses []string) map[int][]string) {
+	before := time.Now()
+	matches := fun(text, addresses)
+	after := time.Now()
+	duration := after.Sub(before)
+
+	fmt.Printf("func %s use %.3f s\n", getFunctionName(fun), duration.Seconds())
 	for position, ptrs := range matches {
-		fmt.Printf("in %d match pattern: %s\n", position, ptrs)
+		if isPrintPattern {
+			fmt.Printf("in %d match pattern: %s\n", position, ptrs)
+		} else {
+			fmt.Printf("in %d match \n", position)
+		}
 	}
+}
+
+func getFunctionName(f interface{}) string {
+	fullName := runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+	parts := strings.Split(fullName, ".")
+	return parts[len(parts)-1]
+}
+
+func ReadAddressesFromFile(filename string) ([]string, error) {
+	var addresses []string
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		address := scanner.Text()
+		addresses = append(addresses, address)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return addresses, nil
 }
